@@ -1,0 +1,8 @@
+
+{
+  "compilerOptions": {
+    "lib": ["deno.ns", "dom"],
+    "strict": true
+  },
+  "include": ["server.ts", "public/app.ts"]
+}

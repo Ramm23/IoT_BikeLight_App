@@ -1,0 +1,17 @@
+{
+    "codecId": "11e2",
+    "sourceUrl": "https://github.com/example/my-lorawan-codec",
+    "mac": "0004A30B010624BC", 
+    "version": "1.0.0",
+    "main": "app.js",
+    "specVersion": "1.0.0",
+    "name": "my-lorawan-codec",
+    "description": "Codec implementing uplink/downlink for my LoRaWAN device, retrieves light sensor data.",
+    "codec": {
+      "encodeDownlink": true,
+      "decodeDownlink": true,
+      "examples": true,
+      "jsonSchemas": false
+    }
+  }
+  
