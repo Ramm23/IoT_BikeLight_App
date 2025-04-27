@@ -1,7 +1,10 @@
 // app.ts
 
-// Your 16-hex-digit device EUI
-const DEVICE_EUI = '00004A30B010D3F45';
+// Your 16-hex-digit device EUI, hard-coded so the browser bundle can see it:
+const DEVICE_EUI = '0004A30B010624BC';
+
+const proto = location.protocol === "https:" ? "wss:" : "ws:";
+const socket = new WebSocket(`${proto}//${location.host}/ws`);
 
 interface UplinkInput {
   bytes: number[];
@@ -15,16 +18,42 @@ interface UplinkOutput {
   errors?:   string[];
 }
 
-// decodeUplink (same as before)
+interface DownlinkOutput {
+  data?:    { setCounter: boolean; range: number };
+  warnings?: string[];
+  errors?:   string[];
+}
+
+// --- decodeUplink (unchanged) ---
 function decodeUplink(input: UplinkInput): UplinkOutput {
-  if (!input.bytes || input.bytes.length < 2) {
-    return { errors: ["Not enough data to decode light sensor value"] };
+  const maybeAscii = String.fromCharCode(...input.bytes);
+  if (/^[0-9A-Fa-f]+$/.test(maybeAscii)) {
+    return { data: { light: parseInt(maybeAscii, 16) }, warnings: [] };
   }
-  const lightRaw   = (input.bytes[0] << 8) | input.bytes[1];
+  if (input.bytes.length < 2) {
+    return { errors: ["Not enough data to decode"] };
+  }
+  const lightRaw = (input.bytes[0] << 8) | input.bytes[1];
   return { data: { light: lightRaw }, warnings: [] };
 }
 
-// encodeDownlink (same as before)
+// --- decodeDownlink (you already had this) ---
+function decodeDownlink(hex: string): DownlinkOutput {
+  if (typeof hex !== "string" || hex.length < 4) {
+    return { errors: ["Invalid downlink hex"] };
+  }
+  try {
+    const b0 = parseInt(hex.substr(0, 2), 16);
+    const b1 = parseInt(hex.substr(2, 2), 16);
+    const setCounter = !!(b0 & 0x01);
+    const range = b1;
+    return { data: { setCounter, range }, warnings: [] };
+  } catch (e: any) {
+    return { errors: ["Failed to decode downlink: " + e.message] };
+  }
+}
+
+// --- encodeDownlink (NEW) ---
 type DownlinkOk  = { fPort: number; bytes: number[]; warnings: string[] };
 type DownlinkErr = { errors: string[] };
 type DownlinkResult = DownlinkOk | DownlinkErr;
@@ -45,14 +74,15 @@ function encodeDownlink(
   }
 }
 
-// Open a WebSocket to your proxy (no secrets here)
-const socket = new WebSocket(`ws://${globalThis.location.host}/ws`);
-
 socket.onopen = () => {
   console.log("✅ Connected to proxy WebSocket");
+  // 1) pull history
+  socket.send(JSON.stringify({ cmd: 'cq', page: 1 }));
+  // 2) then subscribe to just your device
+  socket.send(JSON.stringify({ cmd: 'sub', EUI: DEVICE_EUI }));
 };
 
-socket.onerror = (err) => {
+socket.onerror = err => {
   console.error("⚠️ WebSocket error", err);
 };
 
@@ -60,79 +90,63 @@ socket.onclose = () => {
   console.log("🛑 WebSocket closed");
 };
 
-socket.onmessage = (evt) => {
+
+
+socket.onmessage = evt => {
   const msg = JSON.parse(evt.data);
+  // handle the history response
+  if (msg.cmd === 'cq') {
+    console.log("history:", msg.cache);
+    msg.cache
+      .filter((item: { EUI: string; }) => item.EUI === DEVICE_EUI)
+      .forEach(renderFrame);
+    return;
+  }
 
-  // 1) Look for "rx" frames, and only for your device:
-  if (msg.cmd === "rx" && msg.EUI === DEVICE_EUI) {
-    // 2) Pull timestamp
-    const recvTime = new Date(msg.ts).toISOString();
+  // only pay attention to gateway/uplink frames
+  if ((msg.cmd === 'gw' || msg.cmd === 'rx') && msg.EUI === DEVICE_EUI) {
+    renderFrame(msg);
+  }
 
-    // 3) If Loriot already decoded for you, use that:
-    let dataObj: any;
-    if (msg.decoded && msg.decoded.data) {
-      dataObj = msg.decoded.data;
-    } else {
-      // 4) Otherwise parse the raw hex & run your decodeUplink
-      const hex = msg.data as string;
-      const bytes: number[] = [];
-      for (let i = 0; i < hex.length; i += 2) {
-        bytes.push(parseInt(hex.substr(i, 2), 16));
-      }
-
-      const uplink: UplinkInput = {
-        bytes,
-        fPort:   msg.port,    // e.g. 1 or whatever port
-        recvTime
-      };
-      const decoded = decodeUplink(uplink);
-      if (decoded.errors && decoded.errors.length) {
-        console.error("Decoding errors:", decoded.errors);
-        return;
-      }
-      dataObj = decoded.data!;
-    }
-
-    // 5) Update your UI however makes sense:
-    //    e.g. if your sensor is light:
-    if (typeof dataObj.light === "number") {
-      const container = document.getElementById("sensor-data");
-      if (container) {
-        container.innerHTML = `<p>Light Sensor Value: ${dataObj.light}</p>`;
-      }
-    }
-
-    //    or if your payload has temperature/humidity/pulseCounter:
-    if (typeof dataObj.temperature === "number") {
-      const container = document.getElementById("sensor-data");
-      if (container) {
-        container.innerHTML = `
-          <p>Temp: ${dataObj.temperature}°C</p>
-          <p>Humidity: ${dataObj.humidity * 100}%</p>
-          <p>Pulse: ${dataObj.pulseCounter}</p>
-        `;
-      }
-    }
-
-    else{
-      console.log("random data brrr")
-      const container = document.getElementById("sensor-data");
-      if (container) {
-        container.innerHTML = `<p>random Value: ${dataObj.light}</p>`;
-      }
-    }
+  // downlink confirms
+  if ((msg.cmd === 'tx' || msg.cmd === 'mtx') && msg.EUI === DEVICE_EUI) {
+    console.log("downlink enqueued:", msg);
   }
 };
 
-/**
- * When the user clicks “Send Downlink”, encode & send a `down` message
- * over the same socket. Your server will forward it to Loriot.
- */
+function renderFrame(frame: any) {
+  const hex = frame.data as string;
+  // turn "30313139" → [0x30,0x31,0x31,0x39]
+  const bytes = [];
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes.push(parseInt(hex.substr(i, 2), 16));
+  }
+  const uplink: UplinkInput = {
+    bytes,
+    fPort:   frame.port,
+    recvTime: new Date(frame.ts).toISOString()
+  };
+  const decoded = decodeUplink(uplink);
+  if (decoded.errors?.length) {
+    console.error("decodeUplink error", decoded.errors);
+    return;
+  }
+
+  const container = document.getElementById("sensor-data");
+  if (!container) return;
+  container.innerHTML = 
+    decoded.data!.light != null
+      ? `<p>Light sensor: ${decoded.data!.light}</p>`
+      : `<p>Raw data: ${JSON.stringify(decoded.data)}</p>`;
+}
+
+
 function setupDownlinkButton() {
   const btn = document.getElementById("sendDownlink");
   if (!btn) return console.error("Send button not found");
 
   btn.addEventListener("click", () => {
+    // now uses your encodeDownlink()
     const result = encodeDownlink({ data: { setCounter: true, range: 1 } });
     if ("errors" in result) {
       console.error("Encode errors:", result.errors);
@@ -141,21 +155,16 @@ function setupDownlinkButton() {
     const { fPort, bytes } = result;
     const hex = bytes.map(b => b.toString(16).padStart(2, "0")).join("");
 
-    // Build the downlink envelope Loriot expects
     const downMsg = {
-      type:  "down",
-      devEUI: DEVICE_EUI,
-      cmd:   "tx",
-      port:  fPort,
-      data:  hex,
-      confirmed: false
+      cmd:    "tx",
+      EUI:    DEVICE_EUI,
+      port:   fPort,
+      data:   hex,
+      confirmed: false   // optional
     };
-
     socket.send(JSON.stringify(downMsg));
     console.log("⬇️ Sent downlink message:", downMsg);
   });
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  setupDownlinkButton();
-});
+document.addEventListener("DOMContentLoaded", setupDownlinkButton);

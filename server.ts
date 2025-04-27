@@ -1,119 +1,105 @@
 // server.ts
-import { Application, Router, send } from "https://deno.land/x/oak@v17.1.4/mod.ts";
+import { extname, join } from "https://deno.land/std@0.177.0/path/mod.ts";
+import { contentType }    from "https://deno.land/std@0.177.0/media_types/mod.ts";
 
-// pull your Loriot credentials from env
-const LORIOT_SERVER  = Deno.env.get('LORIOT_SERVER')!;   // e.g. "eu3.loriot.io"
-const LORIOT_APPID   = Deno.env.get('LORIOT_APPID')!;    // e.g. "12345678"
-const LORIOT_API_KEY = Deno.env.get('LORIOT_API_KEY')!;  // your token blob or API key
-const DEVICE_EUI     = Deno.env.get('DEVICE_EUI')!;      // your 16-hex-digit DevEUI
+const LORIOT_SERVER = Deno.env.get("LORIOT_SERVER")!;
+const LORIOT_TOKEN  = Deno.env.get("LORIOT_TOKEN")!;
+const DEVICE_EUI    = Deno.env.get("DEVICE_EUI")!;
+const LORIOT_WS_URL = `wss://${LORIOT_SERVER}/app?token=${LORIOT_TOKEN}`;
 
-const app = new Application();
-const router = new Router();
+console.log("▶️  Starting server on http://localhost:8000");
 
-// static file middleware (unchanged) …
-app.use(async (ctx, next) => {
-  if (ctx.request.method === 'GET') {
-    let fp = ctx.request.url.pathname;
-    if (fp === '/') fp = '/index.html';
-    try {
-      await send(ctx, fp, { root: `${Deno.cwd()}/public` });
-      return;
-    } catch {
-      // fall through to router
+Deno.serve(async (req: Request): Promise<Response> => {
+  const url      = new URL(req.url);
+  const pathname = url.pathname;
+  const method   = req.method;
+
+  // 1) WebSocket proxy
+  if (pathname === "/ws") {
+    if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+      return new Response("Upgrade Required", { status: 400 });
     }
-  }
-  await next();
-});
 
-// CORS if you need REST endpoints (unchanged) …
-app.use(async (ctx, next) => {
-  ctx.response.headers.set('Access-Control-Allow-Origin', '*');
-  ctx.response.headers.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  ctx.response.headers.set('Access-Control-Allow-Headers', 'Content-Type');
-  if (ctx.request.method === 'OPTIONS') {
-    ctx.response.status = 204;
-  } else {
-    await next();
-  }
-});
+    // upgrade the client connection
+    const { socket: client, response } = Deno.upgradeWebSocket(req);
 
-// server.ts (inside router.get('/ws', …))
-router.get('/ws', (ctx) => {
-  if (!ctx.isUpgradable) {
-    ctx.throw(400, 'WebSocket upgrade required');
-  }
-  const client = ctx.upgrade();
+    let upstream: WebSocket;
+    let reconnectTimer: number;
 
-  // pull your real credentials from env
-  const LORIOT_SERVER  = Deno.env.get('LORIOT_SERVER')!;
-  const LORIOT_APPID   = Deno.env.get('LORIOT_APPID')!;
-  const LORIOT_API_KEY = Deno.env.get('LORIOT_API_KEY')!;
-  const DEVICE_EUI     = Deno.env.get('DEVICE_EUI')!;
+    const connectUpstream = () => {
+      console.log("→ Connecting to Loriot:", LORIOT_WS_URL);
+      upstream = new WebSocket(LORIOT_WS_URL);
 
-  // make sure you include both appid & token
-  const loriotUrl = `wss://iotnet.teracom.dk/app?token=vnoWXAAAABFpb3RuZXQudGVyYWNvbS5kaw9vz-jYaZlFTGEH4ILUpFU=`;
+      upstream.onopen = () => {
+        console.log("✅ Connected to Loriot WS");
+        // ask for history (optional):
+        upstream.send(JSON.stringify({ cmd: "cq", page: 1 }));
+        // then subscribe to all frames for your device:
+        upstream.send(JSON.stringify({ cmd: "sub", EUI: DEVICE_EUI }));
+      };
 
-  let external: WebSocket;
-  let reconnectTimer: number;
+      upstream.onmessage = (evt) => {
+        // try JSON‐parse; if it’s your device, forward it
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.EUI === DEVICE_EUI || msg.devEUI === DEVICE_EUI) {
+            client.send(evt.data);
+          }
+        } catch {
+          // if it wasn’t JSON, just relay raw
+          client.send(evt.data);
+        }
+      };
 
-  function connectUpstream() {
-    console.log('→ Connecting to Loriot:', loriotUrl);
-    external = new WebSocket(loriotUrl);
+      upstream.onerror = (err) => {
+        console.error("⚠️  Loriot WS error:", err);
+        // let onclose handle reconnect
+      };
 
-    external.onopen = () => {
-      console.log('✅ Loriot WS connected');
-      // if Loriot requires a “subscribe” message, you could send it here:
-      // external.send(JSON.stringify({ cmd: 'sub' }));
+      upstream.onclose = () => {
+        console.warn("ℹ️  Loriot WS closed, retrying in 5s");
+        reconnectTimer = setTimeout(connectUpstream, 5_000);
+      };
     };
 
-    external.onmessage = (e) => {
-      // forward only your device’s frames
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.devEUI === DEVICE_EUI) {
-          client.send(e.data);
-        }
-      } catch {
-        // if it wasn’t JSON, just relay it
-        client.send(e.data);
+    client.onclose = () => {
+      console.log("🛑 Client disconnected; closing upstream");
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (upstream.readyState === WebSocket.OPEN) {
+        upstream.close();
       }
     };
 
-    external.onerror = (err) => {
-      console.error('⚠️ Loriot WS error', err);
-      // we’ll let onclose handle reconnection
+    client.onmessage = (evt) => {
+      // any “down” you send from the browser goes upstream unchanged
+      if (upstream.readyState === WebSocket.OPEN) {
+        upstream.send(evt.data);
+      }
     };
 
-    external.onclose = () => {
-      console.warn('ℹ️ Loriot WS closed, will reconnect in 5s');
-      // don’t close the client socket, but retry upstream:
-      reconnectTimer = setTimeout(connectUpstream, 5000);
-    };
+    // start it
+    connectUpstream();
+    return response;
   }
 
-  // when the browser‐client disconnects, tear down upstream too
-  client.onclose = () => {
-    console.log('🛑 Client disconnected; closing upstream');
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    if (external.readyState === WebSocket.OPEN) {
-      external.close();
-    }
-  };
+  // 2) static file serving
+  if (method === "GET") {
+    const fp       = pathname === "/" ? "/index.html" : pathname;
+    const safePath = join("", fp);
+    const fullPath = join(Deno.cwd(), "public", safePath);
 
-  // any “downlink” messages from client go upstream
-  client.onmessage = (e) => {
-    if (external.readyState === WebSocket.OPEN) {
-      external.send(e.data);
+    try {
+      const data = await Deno.readFile(fullPath);
+      const ct   = contentType(extname(fullPath)) || "application/octet-stream";
+      return new Response(data, {
+        status: 200,
+        headers: { "content-type": ct },
+      });
+    } catch {
+      return new Response("Not Found", { status: 404 });
     }
-  };
+  }
 
-  // kick off
-  connectUpstream();
+  // 3) everything else
+  return new Response("Method Not Allowed", { status: 405 });
 });
-
-
-app.use(router.routes());
-app.use(router.allowedMethods());
-
-console.log('Server running on http://localhost:8000');
-await app.listen({ port: 8000 });
