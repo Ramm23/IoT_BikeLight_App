@@ -88,10 +88,13 @@
       const downMsg = {
         cmd: "tx",
         EUI: DEVICE_EUI,
-        port: fPort,
+        // field name must be "EUI"
         data: hex,
-        confirmed: false
-        // optional
+        port: 2,
+        // fport number
+        confirmed: false,
+        priority: 0
+        // include priority, even if zero
       };
       socket.send(JSON.stringify(downMsg));
       console.log("\u2B07\uFE0F Sent downlink message:", downMsg);

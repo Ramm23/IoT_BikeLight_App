@@ -146,7 +146,7 @@ function setupDownlinkButton() {
   if (!btn) return console.error("Send button not found");
 
   btn.addEventListener("click", () => {
-    // now uses your encodeDownlink()
+    // 1) build your payload bytes however you already do...
     const result = encodeDownlink({ data: { setCounter: true, range: 1 } });
     if ("errors" in result) {
       console.error("Encode errors:", result.errors);
@@ -155,16 +155,21 @@ function setupDownlinkButton() {
     const { fPort, bytes } = result;
     const hex = bytes.map(b => b.toString(16).padStart(2, "0")).join("");
 
+    // 2) now build the exact JSON Loriot wants:
     const downMsg = {
-      cmd:    "tx",
-      EUI:    DEVICE_EUI,
-      port:   fPort,
-      data:   hex,
-      confirmed: false   // optional
+      cmd:       "tx",
+      EUI:       DEVICE_EUI,  // field name must be "EUI"
+      data:      hex,
+      port:      2,           // fport number
+      confirmed: false,
+      priority:  0            // include priority, even if zero
     };
+
+    // 3) send it
     socket.send(JSON.stringify(downMsg));
     console.log("⬇️ Sent downlink message:", downMsg);
   });
 }
+
 
 document.addEventListener("DOMContentLoaded", setupDownlinkButton);
