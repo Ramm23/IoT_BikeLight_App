@@ -4,5 +4,8 @@
     "lib": ["deno.ns", "dom"],
     "strict": true
   },
-  "include": ["server.ts", "public/app.ts"]
+  "include": ["server.ts", "public/app.ts"],
+  "imports": {
+    "leaflet": "npm:leaflet@^1.9.4"
+  }
 }

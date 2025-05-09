@@ -1,105 +1,89 @@
-(() => {
-  // app.ts
-  var DEVICE_EUI = "0004A30B010624BC";
-  var proto = location.protocol === "https:" ? "wss:" : "ws:";
-  var socket = new WebSocket(`${proto}//${location.host}/ws`);
-  function decodeUplink(input) {
-    const maybeAscii = String.fromCharCode(...input.bytes);
-    if (/^[0-9A-Fa-f]+$/.test(maybeAscii)) {
-      return { data: { light: parseInt(maybeAscii, 16) }, warnings: [] };
-    }
-    if (input.bytes.length < 2) {
-      return { errors: ["Not enough data to decode"] };
-    }
-    const lightRaw = input.bytes[0] << 8 | input.bytes[1];
-    return { data: { light: lightRaw }, warnings: [] };
-  }
-  function encodeDownlink(input) {
-    try {
-      const { setCounter, range } = input.data;
-      if (typeof range !== "number") {
-        return { errors: ["Missing or invalid 'range' in downlink data"] };
-      }
-      const byte0 = setCounter ? 1 : 0;
-      const byte1 = range & 255;
-      return { fPort: 10, bytes: [byte0, byte1], warnings: [] };
-    } catch (err) {
-      return { errors: ["Failed to encode downlink: " + err.message] };
-    }
-  }
-  socket.onopen = () => {
-    console.log("\u2705 Connected to proxy WebSocket");
-    socket.send(JSON.stringify({ cmd: "cq", page: 1 }));
-    socket.send(JSON.stringify({ cmd: "sub", EUI: DEVICE_EUI }));
+// app.ts
+import * as L from "https://esm.sh/leaflet@1.9.4";
+var DEVICE_EUI = "0004A30B010D3F45";
+var map2;
+var marker2;
+var circle2;
+function setupMap() {
+  map2 = L.map("map").setView([51.505, -0.09], 13);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map2);
+  marker2 = L.marker([51.5, -0.09]).addTo(map2).bindPopup("Current Location.").openPopup();
+  circle2 = L.circle([51.5, -0.09], { radius: 200 }).addTo(map2);
+}
+function parsePayload(bytes) {
+  const view = new DataView(new ArrayBuffer(13));
+  bytes.forEach((b, i) => view.setUint8(i, b));
+  return {
+    lat: view.getInt32(0, true) / 1e7,
+    lng: view.getInt32(4, true) / 1e7,
+    acc: view.getUint32(8, true) / 1e3,
+    battery: view.getUint8(12)
   };
-  socket.onerror = (err) => {
-    console.error("\u26A0\uFE0F WebSocket error", err);
-  };
-  socket.onclose = () => {
-    console.log("\u{1F6D1} WebSocket closed");
-  };
-  socket.onmessage = (evt) => {
-    const msg = JSON.parse(evt.data);
-    if (msg.cmd === "cq") {
-      console.log("history:", msg.cache);
-      msg.cache.filter((item) => item.EUI === DEVICE_EUI).forEach(renderFrame);
-      return;
-    }
-    if ((msg.cmd === "gw" || msg.cmd === "rx") && msg.EUI === DEVICE_EUI) {
-      renderFrame(msg);
-    }
-    if ((msg.cmd === "tx" || msg.cmd === "mtx") && msg.EUI === DEVICE_EUI) {
-      console.log("downlink enqueued:", msg);
-    }
-  };
-  function renderFrame(frame) {
-    const hex = frame.data;
-    const bytes = [];
-    for (let i = 0; i < hex.length; i += 2) {
-      bytes.push(parseInt(hex.substr(i, 2), 16));
-    }
-    const uplink = {
-      bytes,
-      fPort: frame.port,
-      recvTime: new Date(frame.ts).toISOString()
-    };
-    const decoded = decodeUplink(uplink);
-    if (decoded.errors?.length) {
-      console.error("decodeUplink error", decoded.errors);
-      return;
-    }
-    const container = document.getElementById("sensor-data");
-    if (!container)
-      return;
-    container.innerHTML = decoded.data.light != null ? `<p>Light sensor: ${decoded.data.light}</p>` : `<p>Raw data: ${JSON.stringify(decoded.data)}</p>`;
+}
+function renderFrame(frame) {
+  const outerHex = frame.data;
+  const raw = [];
+  for (let i = 0; i < outerHex.length; i += 2) {
+    raw.push(parseInt(outerHex.slice(i, i + 2), 16));
   }
-  function setupDownlinkButton() {
-    const btn = document.getElementById("sendDownlink");
-    if (!btn)
-      return console.error("Send button not found");
-    btn.addEventListener("click", () => {
-      const result = encodeDownlink({ data: { setCounter: true, range: 1 } });
-      if ("errors" in result) {
-        console.error("Encode errors:", result.errors);
-        return;
-      }
-      const { fPort, bytes } = result;
-      const hex = bytes.map((b) => b.toString(16).padStart(2, "0")).join("");
-      const downMsg = {
-        cmd: "tx",
-        EUI: DEVICE_EUI,
-        // field name must be "EUI"
-        data: hex,
-        port: 2,
-        // fport number
-        confirmed: false,
-        priority: 0
-        // include priority, even if zero
-      };
-      socket.send(JSON.stringify(downMsg));
-      console.log("\u2B07\uFE0F Sent downlink message:", downMsg);
-    });
+  console.log(raw);
+  if (raw.length !== 13) {
+    console.error(`Expected 13 bytes but got ${raw.length}`);
+    return;
   }
-  document.addEventListener("DOMContentLoaded", setupDownlinkButton);
-})();
+  const { lat, lng, battery, acc } = parsePayload(raw);
+  marker2.setLatLng([lat, lng]);
+  circle2.setLatLng([lat, lng]);
+  circle2.setRadius(acc);
+  map2.panTo([lat, lng]);
+  const el = document.getElementById("sensor-data");
+  if (el) {
+    el.innerHTML = `
+      <p>Latitude: ${lat.toFixed(6)}</p>
+      <p>Longitude: ${lng.toFixed(6)}</p>
+      <p> Accuracy:${acc.toFixed(6)}</p>
+      <p>Battery: ${battery}</p>
+    `;
+  }
+}
+function encodeDownlink(input) {
+  const { setCounter, range } = input;
+  if (typeof range !== "number")
+    return { errors: ["Invalid range"] };
+  return { fPort: 10, bytes: [setCounter ? 1 : 0, range & 255], warnings: [] };
+}
+var proto = location.protocol === "https:" ? "wss:" : "ws:";
+var socket = new WebSocket(`${proto}//${location.host}/ws`);
+socket.onopen = () => {
+  socket.send(JSON.stringify({ cmd: "cq", page: 1 }));
+  socket.send(JSON.stringify({ cmd: "sub", EUI: DEVICE_EUI }));
+};
+socket.onmessage = (evt) => {
+  const msg = JSON.parse(evt.data);
+  if (msg.cmd === "cq") {
+    msg.cache.filter((i) => i.EUI === DEVICE_EUI).forEach(renderFrame);
+  } else if ((msg.cmd === "gw" || msg.cmd === "rx") && msg.EUI === DEVICE_EUI) {
+    renderFrame(msg);
+  }
+};
+socket.onerror = (e) => console.error("WS error", e);
+socket.onclose = () => console.log("WS closed");
+function setupDownlinkButton() {
+  const btn = document.getElementById("sendDownlink");
+  if (!btn)
+    return;
+  btn.addEventListener("click", () => {
+    const res = encodeDownlink({ setCounter: true, range: 1 });
+    if ("errors" in res)
+      return console.error(res.errors);
+    const hex = res.bytes.map((b) => b.toString(16).padStart(2, "1")).join("");
+    socket.send(JSON.stringify({ cmd: "tx", EUI: DEVICE_EUI, data: hex, port: 2, confirmed: false, priority: 0 }));
+  });
+}
+document.addEventListener("DOMContentLoaded", () => {
+  setupMap();
+  setupDownlinkButton();
+});
 //# sourceMappingURL=app.js.map

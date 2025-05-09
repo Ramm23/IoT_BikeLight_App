@@ -6,12 +6,15 @@ await esbuild.build({
   entryPoints: ["app.ts"],
   bundle: true,
   outfile: "public/app.js",
-  minify: false, // Set to true if you want minification
-  sourcemap: true, // Generates a sourcemap for debugging
+  format: "esm",           // Output as native ES module
+  platform: "browser",     // Target browser environment
+  target: ["es2020"],      // Modern JS target
+  minify: false,
+  sourcemap: true,
 });
 
-console.log("Bundle generated at app.js");
-
+console.log("✅ ES module bundle generated at public/app.js");
 
 // Shut down the esbuild service when done
 esbuild.stop();
+
