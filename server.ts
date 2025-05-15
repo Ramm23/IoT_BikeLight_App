@@ -39,17 +39,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
       };
 
       upstream.onmessage = (evt) => {
-        // try JSON‐parse; if it’s your device, forward it
         try {
           const msg = JSON.parse(evt.data);
-          if (msg.EUI === DEVICE_EUI || msg.devEUI === DEVICE_EUI) {
+          if (
+            msg.cmd === "cq" ||
+            msg.EUI === DEVICE_EUI ||
+            msg.devEUI === DEVICE_EUI
+          ) {
             client.send(evt.data);
           }
         } catch {
-          // if it wasn’t JSON, just relay raw
+          // Not JSON? just relay it
           client.send(evt.data);
         }
       };
+
 
       upstream.onerror = (err) => {
         console.error("⚠️  Loriot WS error:", err);

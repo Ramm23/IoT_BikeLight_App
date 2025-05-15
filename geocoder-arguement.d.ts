@@ -1,7 +1,7 @@
 // geocoder-augment.d.ts
-import type * as L from "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.esm.js";
+import type * as L from 'https://esm.sh/leaflet@1.9.4';
 
-declare module "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.esm.js" {
+declare module 'https://esm.sh/leaflet@1.9.4' {
   namespace Control {
     /**
      * Adds the geocoder control.

@@ -1,30 +1,48 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>LoRaWAN Tracker (Leaflet)</title>
-
-    <!-- Leaflet’s own CSS first -->
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin=""
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tracker Dashboard</title>
+  <!-- Link your custom styles -->
+  <link rel="stylesheet" href="/styles.css" />
+  <!-- Leaflet CSS for the map -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha384-sA+PO3g1bv3xXNh5XQ+L8N+VFKq3NsyEkBD6V0zZt0dblDF8L8YvuWcY1cQmFK+S"
+    crossorigin=""
+  />
+</head>
+<body>
+  <div class="controls">
+    <!-- Textual sensor data -->
+    <div id="sensor-data">Loading&hellip;</div>
+    <!-- Battery icon placeholder -->
+    <img
+      id="battery-icon"
+      src="/images/battery-0.png"
+      alt="Battery status"
+      width="32"
+      height="32"
     />
+    <!-- Mode toggle button -->
+    <button id="sendDownlink">Switch to Stolen Mode</button>
+  </div>
 
-    <!-- Your custom styles next -->
-    <link rel="stylesheet" href="styles.css" />
-  </head>
+  <!-- Map container -->
+  <div id="map"></div>
 
-  <body>
-    <div id="sensor-data">Waiting for position…</div>
-    <div id="map"></div>
-    <button id="sendDownlink">Send Downlink</button>
+  <!-- Your compiled TypeScript (app.js) -->
+  <script type="module" src="/app.js"></script>
 
-    <!-- Your bundled ES module (imports Leaflet via esm.sh) -->
-    <script type="module" src="/app.js"></script>
-
-    <!-- You do *not* need to include leaflet.js here,
-         since app.js already imports it via esm.sh -->
-  </body>
+  <!-- Leaflet JS (optional if not imported via ESM) -->
+  <!--
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha384-vWkB+y41mAngY+IfvunE1zstY3oUaoYgibR0NSuBIfG+QEJDz4EUXauhKCI6XuTx"
+    crossorigin=""
+  ></script>
+  -->
+</body>
 </html>
