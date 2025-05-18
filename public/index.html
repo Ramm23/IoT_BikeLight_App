@@ -9,12 +9,25 @@
   <!-- Leaflet CSS for the map -->
   <link
     rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha384-sA+PO3g1bv3xXNh5XQ+L8N+VFKq3NsyEkBD6V0zZt0dblDF8L8YvuWcY1cQmFK+S"
-    crossorigin=""
+    rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
+    crossorigin="" 
   />
 </head>
 <body>
+  <header>
+  <img src="/images/bike_Logo.png" alt="Group 6 IoT Bike Logo" id="logo" />
+  <h1>Group 6 IoT Bike</h1>
+</header>
+  <div class="description">
+    <p>
+      This is a demo of the Group 6 IoT Bike Tracker. The bike is equipped with
+      a GPS and a battery sensor. The bike can be tracked in real-time on the
+      map below.
+    </p>
+    <p>
+      The bike can also be put into "stolen mode" which will send an alert to
+      the owner if the bike is moved without authorization.
+    </p>
   <div class="controls">
     <!-- Textual sensor data -->
     <div id="sensor-data">Loading&hellip;</div>
@@ -38,11 +51,7 @@
 
   <!-- Leaflet JS (optional if not imported via ESM) -->
   <!--
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha384-vWkB+y41mAngY+IfvunE1zstY3oUaoYgibR0NSuBIfG+QEJDz4EUXauhKCI6XuTx"
-    crossorigin=""
-  ></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   -->
 </body>
 </html>

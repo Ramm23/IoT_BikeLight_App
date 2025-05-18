@@ -23,11 +23,13 @@ function updateModeUI() {
   if (isStolenMode) {
     mapEl.style.display = "block";
     btn.textContent = "Switch to Standard Mode";
-    setTimeout(() => map2.invalidateSize(), 0);
+    requestAnimationFrame(() => map2.invalidateSize());
   } else {
     mapEl.style.display = "none";
     btn.textContent = "Switch to Stolen Mode";
   }
+  btn.classList.toggle("stolen", isStolenMode);
+  btn.classList.toggle("standard", !isStolenMode);
 }
 function setupMap() {
   map2 = L.map("map").setView([51.505, -0.09], 13);
@@ -36,9 +38,7 @@ function setupMap() {
   }).addTo(map2);
   marker2 = L.marker([51.5, -0.09]).addTo(map2).bindPopup("Current Location.").openPopup();
   circle2 = L.circle([51.5, -0.09], { radius: 200 }).addTo(map2);
-  const mapEl = document.getElementById("map");
-  if (mapEl)
-    mapEl.style.display = "none";
+  document.getElementById("map").style.display = "none";
 }
 function parsePayload(bytes) {
   const view = new DataView(new ArrayBuffer(bytes.length));
@@ -50,36 +50,60 @@ function parsePayload(bytes) {
     battery: view.getUint8(12)
   };
 }
-function renderFrame(frame) {
-  const outerHex = frame.data;
-  const raw = [];
-  for (let i = 0; i < outerHex.length; i += 2) {
-    raw.push(parseInt(outerHex.slice(i, i + 2), 16));
+function decodeBatteryByte(byte) {
+  const idx = Math.min(3, byte & 3);
+  const percentMap = [0, 25, 50, 100];
+  const percent = percentMap[idx];
+  const suffix = idx.toString(2).padStart(2, "0");
+  return { percent, suffix };
+}
+function updateBatteryIcon(percent) {
+  const { percent: pct } = decodeBatteryByte(percent);
+  const img = document.getElementById("battery-icon");
+  if (!img) {
+    console.warn("Battery icon element not found");
+    return;
   }
+  const fileName = `battery_${pct}%.png`;
+  img.src = `/images/${fileName}`;
+}
+function renderFrame(frame) {
+  const hex = frame.data;
+  const raw = Array.from(
+    { length: hex.length / 2 },
+    (_, i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+  );
   const el = document.getElementById("sensor-data");
   if (!el)
     return;
   if (isStolenMode) {
-    if (raw.length !== 13) {
-      console.error(`Stolen mode expects 13 bytes, got ${raw.length}`);
+    if (raw.length !== 13)
       return;
-    }
-    const { lat, lng, acc } = parsePayload(raw);
+    const { lat, lng, acc, battery } = parsePayload(raw);
+    updateBatteryIcon(battery);
+    el.innerHTML = `<p>Latitude: ${lat.toFixed(6)}</p><p>Longitude: ${lng.toFixed(6)}</p>`;
     marker2.setLatLng([lat, lng]);
     circle2.setLatLng([lat, lng]).setRadius(acc);
     map2.panTo([lat, lng]);
-    el.innerHTML = `
-      <p>Latitude: ${lat.toFixed(6)}</p>
-      <p>Longitude: ${lng.toFixed(6)}</p>
-    `;
   } else {
-    if (raw.length !== 1) {
-      console.error(`Standard mode expects 1 byte, got ${raw.length}`);
+    if (raw.length !== 1)
       return;
-    }
-    const battery = raw[0];
-    el.innerHTML = `<p>Battery: ${battery}%</p>`;
+    const { percent } = decodeBatteryByte(raw[0]);
+    updateBatteryIcon(percent);
+    el.innerHTML = `<p>Battery: ${percent}%</p>`;
   }
+}
+function setupDownlinkButton() {
+  const btn = document.getElementById("sendDownlink");
+  if (!btn)
+    return;
+  btn.addEventListener("click", () => {
+    isStolenMode = !isStolenMode;
+    setCookie("mode", isStolenMode ? "1" : "0", 7);
+    updateModeUI();
+    const hex = isStolenMode ? "01" : "00";
+    socket.send(JSON.stringify({ cmd: "tx", EUI: DEVICE_EUI, data: hex, port: 2, confirmed: false, priority: 0 }));
+  });
 }
 var proto = location.protocol === "https:" ? "wss:" : "ws:";
 var socket = new WebSocket(`${proto}//${location.host}/ws`);
@@ -90,21 +114,22 @@ socket.onopen = () => {
 socket.onmessage = (evt) => {
   const msg = JSON.parse(evt.data);
   if (msg.cmd === "cq") {
-    const cache = msg.cache.filter((i) => i.EUI === DEVICE_EUI);
+    const cache = msg.cache.filter(
+      (i) => i.EUI === DEVICE_EUI && (i.cmd === "rx" || i.cmd === "gw")
+    );
     if (cache.length) {
-      const last = cache[cache.length - 1];
-      const hex = last.data;
-      const rawBytes = [];
-      for (let i = 0; i < hex.length; i += 2) {
-        rawBytes.push(parseInt(hex.slice(i, i + 2), 16));
-      }
-      const detectedStolen = rawBytes.length === 13;
+      const first = cache[0];
+      const bytes = Array.from(
+        { length: first.data.length / 2 },
+        (_, i) => parseInt(first.data.slice(i * 2, i * 2 + 2), 16)
+      );
+      const detectedStolen = bytes.length === 13;
       if (detectedStolen !== isStolenMode) {
         isStolenMode = detectedStolen;
         setCookie("mode", isStolenMode ? "1" : "0", 7);
         updateModeUI();
       }
-      renderFrame(last);
+      renderFrame(first);
     }
   } else if ((msg.cmd === "gw" || msg.cmd === "rx") && msg.EUI === DEVICE_EUI) {
     renderFrame(msg);
@@ -112,29 +137,13 @@ socket.onmessage = (evt) => {
 };
 socket.onerror = (e) => console.error("WS error", e);
 socket.onclose = () => console.log("WS closed");
-function setupDownlinkButton() {
-  const btn = document.getElementById("sendDownlink");
-  if (!btn)
-    return;
-  btn.addEventListener("click", () => {
-    isStolenMode = !isStolenMode;
-    setCookie("mode", isStolenMode ? "1" : "0", 7);
-    updateModeUI();
-    const hex = isStolenMode ? "01" : "00";
-    socket.send(JSON.stringify({
-      cmd: "tx",
-      EUI: DEVICE_EUI,
-      data: hex,
-      port: 2,
-      confirmed: false,
-      priority: 0
-    }));
-  });
-}
 document.addEventListener("DOMContentLoaded", () => {
   setupMap();
   isStolenMode = getCookie("mode") === "1";
-  updateModeUI();
   setupDownlinkButton();
+  updateModeUI();
 });
+export {
+  updateBatteryIcon
+};
 //# sourceMappingURL=app.js.map
