@@ -22,11 +22,11 @@ function updateModeUI() {
     return;
   if (isStolenMode) {
     mapEl.style.display = "block";
-    btn.textContent = "Switch to Standard Mode";
+    btn.textContent = "Stop Tracking";
     requestAnimationFrame(() => map2.invalidateSize());
   } else {
     mapEl.style.display = "none";
-    btn.textContent = "Switch to Stolen Mode";
+    btn.textContent = "Report Stolen";
   }
   btn.classList.toggle("stolen", isStolenMode);
   btn.classList.toggle("standard", !isStolenMode);

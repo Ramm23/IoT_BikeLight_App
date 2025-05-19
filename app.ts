@@ -32,12 +32,13 @@ function updateModeUI() {
 
   if (isStolenMode) {
     mapEl.style.display = 'block';
-    btn.textContent = 'Switch to Standard Mode';
+    btn.textContent = 'Stop Tracking';
     // Recalculate Leaflet map size when visible
     requestAnimationFrame(() => map.invalidateSize());
   } else {
     mapEl.style.display = 'none';
-    btn.textContent = 'Switch to Stolen Mode';
+    btn.textContent = 'Report Stolen';
+    // Reset map view to default
   }
 
   // Toggle CSS classes for button color

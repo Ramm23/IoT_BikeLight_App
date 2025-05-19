@@ -1,0 +1,29 @@
+## Bundle TypeScript file into JavaScript
+
+deno run --allow-read --allow-write --allow-net esbuild_bundle.ts
+
+
+
+##Run Application
+
+deno run --allow-net --allow-read --allow-write server.ts
+
+
+
+## My esp32 MAC address
+
+0004A30B010624BC
+
+## From device to website : Battery level, GPS location(only for stolen button)
+## From website to device : Stolen button alarm.
+
+#Env Variables
+
+$Env:LORIOT_SERVER = "iotnet.teracom.dk"
+$Env:DEVICE_EUI    = "0004A30B010624BC"
+$Env:LORIOT_TOKEN  = "vnoWXQAAABFpb3RuZXQudGVyYWNvbS5ka7IZMPI-V86CPKqcRbRLi_0="
+deno run --allow-env --allow-net --allow-read server.ts
+
+const char* DEV_EUI  = "0004A30B010624BC";
+const char* APP_EUI  = "BE7A00000000165D";
+const char* APP_KEY  = "1AB91E2D2F7C045196DB68D239C3C5BF";
